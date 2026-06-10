@@ -1,7 +1,7 @@
 # Requisitos previos
 Para poder utilizar la app es necesario:
-*Tener instalada la app **RStudio**
-*Tener instalados los paquetes **shiny** y **bslib**. (install.packages("shiny");install.packages("bslib"))
+* Tener instalada la app **RStudio**
+* Tener instalados los paquetes **shiny** y **bslib**. (install.packages("shiny");install.packages("bslib"))
 
 # Intsrucciones de ejecución
 1. Descargar el archivo **App.Rmd**
