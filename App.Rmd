@@ -1,0 +1,712 @@
+---
+title: "App Regresión Lineal Simple"
+author: "David González Moya"
+date: "2026-06-10"
+output: html_document
+---
+
+
+
+```{r}
+library(shiny)
+library(bslib)
+
+
+ui <- page_sidebar(
+ 
+  title="Regresión lineal",
+  theme = bs_theme(version = 5, preset = "flatly"),
+  
+  sidebar = sidebar(
+    width = 300,
+  
+      numericInput("x","Valor para x",value = 15,      
+        min = 1,max = 30,step = 1),
+      
+      numericInput(inputId = "y",label = "Valor para y",value = 75,      
+      min = 50,max = 150,step = 1),
+      actionButton("btn_enviar", "Añadir observación", icon = icon("paper-plane"), class="btn-success"),
+
+    numericInput("num_fila_borrar", "Fila a eliminar:", value = 1, min = 1, step = 1),
+    actionButton("btn_borrar_fila", "Eliminar Fila", class = "btn-danger btn-sm"),
+      
+      br(),
+    p("Pulsa limpiar para eliminar todas las observaciones añadidas"),
+      actionButton("btn_limpiar", "Limpiar", icon = icon("trash"),class="btn-danger"),
+      br(),
+    
+      p("Para generar un nuevo conjunto de 9 datos aleatorios:"),
+      br(), 
+
+      actionButton("btn_nuevo_escenario", "Nuevo Escenario", icon = icon("dice"),             class="btn-warning"),  
+    
+      hr(),
+      h4("Cargar Datos Externos"),
+      uiOutput("caja_subir_archivo"),
+      
+      # Añadimos un botón pequeñito y rojo exclusivo para quitar el arcvhivo
+      actionButton("btn_quitar_archivo", "Quitar archivo", icon = icon("times"), class="btn-danger btn-sm"),
+      
+      p(style = "font-size: 12px; color: gray; margin-top: 10px;", "Sube un archivo .csv o .txt con dos columnas (X e Y)."),
+
+    
+      hr(), 
+      h4("Datos de Referencia"),
+      p("Úsalos como guía para introducir tus valores:"),
+      uiOutput("tablaDatosOriginales")
+    ),
+    
+      tabsetPanel(
+        
+        tabPanel("1.Gráfico Principal",
+                 br(),
+                 plotOutput("graficaRectas"),
+                 br(),
+                 
+                 uiOutput("tarjetaOriginal"),
+                 uiOutput("tarjetaNueva")
+        ),
+        
+        tabPanel("2.Diagnosis del modelo",
+                 
+                 # 1. Linealidad
+                 br(),
+                 h4("1. Gráfico de Residuos vs Ajustados (Linealidad)"),
+                 p("Para que el modelo sea válido, la línea roja debe ser lo más horizontal posible (pegada al 0). Si hay curvas pronunciadas, la relación no es lineal."),
+                 plotOutput("plotLinealidad", height = "400px"),
+                 
+                 # 2. Homocedasticidad
+                 br(),
+                 hr(), 
+                 h4("2. Gráfico de Propagación de Residuos (Homocedasticidad)"),
+                 p("Evalúa si la varianza de los errores es constante. Busca que los puntos estén esparcidos de forma aleatoria a lo largo de una línea horizontal roja, sin formar un embudo o triángulo."),
+                 plotOutput("plotHomocedasticidad", height = "400px"),
+                 
+                 # 3. Normalidad 
+                 br(),
+                 hr(),
+                 h4("3. Normalidad de los Residuos (Gráfico Q-Q y Test)"),
+                 p("Comprueba si los errores siguen una distribución normal. En la gráfica de la izquierda (curva de densidad), la línea debería tener forma de campana simétrica centrada en el cero. En el gráfico de la derecha (Q-Q), los puntos deberían caer sobre la línea diagonal. El test de  ", 
+                   tags$b("Shapiro-WIlk"), 
+                   "  confirma estadísticamente esta hipótesis."),
+                 plotOutput("plotNormalidad", height = "400px"),
+                 verbatimTextOutput("testResiduos"), 
+                 
+                 # 4. Independencia 
+                 br(),
+                 hr(),
+                 h4("4. Independencia de los Residuos (Autocorrelación)"),
+                 p("Evalúa si los errores están relacionados entre sí. En el gráfico, los puntos deberían saltar arriba y abajo del 0 sin un patrón claro. En el test de  ", 
+                   tags$b("Durbin-Watson"), 
+                   " , un valor cercano a 2 indica que todo está perfecto (no hay autocorrelación)."),
+                 plotOutput("plotAutocorrelacion", height = "400px"),
+                 verbatimTextOutput("testDW")
+                 ),
+
+        
+        tabPanel("3.Anomalías e influencia",               
+                 br(),
+                 hr(),
+
+                 h5("A. Detección de Valores Anómalos (Outliers)"),
+                p("Un punto es considerado anómalo si su residuo es excepcionalmente grande. En el gráfico, sospecharemos de los puntos que crucen las líneas rojas (residuos estandarizados mayores a 2 o menores a -2). Para confirmarlo matemáticamente, evaluamos el residuo mayor aplicando la ", 
+                   tags$b("corrección de Bonferroni"), 
+                   " , un ajuste estadístico vital para evitar detectar falsos atípicos por puro azar."),
+                
+                 plotOutput("plotResiduosEstandarizados", height = "400px"),
+                 verbatimTextOutput("testBonferroni"),
+                 
+                 br(),
+                 h5("B. Observaciones Influyentes (Distancia de Cook)"),
+                 p("Que un punto sea anómalo no significa que arruine el modelo. Un punto es ", 
+                   tags$b("INFLUYENTE"), 
+                   " solo si tiene el poder de torcer la recta."),
+                                  tags$ul(
+                   tags$li(style = "margin-bottom: 5px;", 
+                           tags$b("En la gráfica de la izquierda:"), 
+                           " Vemos cómo cambia la recta de regresión original con la implementación del nuevo valor."),
+                   
+                   tags$li(tags$b("En la gráfica de la derecha:"), 
+                           " Aparecen las distancias de Cook. Decimos que un punto es influyente si su valor está cercano a ", 
+                           tags$b("1"), 
+                           " y es mucho más grande que los demás.")
+                 ),
+                 plotOutput("plotInfluencia", height = "450px")
+        ),
+        tabPanel("4.Predicciones",               
+                 br(),
+                 hr(),
+                 h4("4. Predicción del Modelo"),
+                 p("Introduce un valor de X para descubrir qué valor de Y estima cada recta de regresión: la original y la nueva con tus datos añadidos"),
+                 numericInput("x_prediccion", "Valor de X a predecir:", value = 20, width = "250px"),
+                 
+                 br(),
+                 uiOutput("tarjetaPrediccion"),
+                 br(), br()
+                 )
+        
+    ) # Cierra tabsetPanel
+) # Cierra ui
+
+
+
+
+
+server <- function(input, output) {
+  
+  # Datos iniciales
+  generar_datos_aleatorios <- function() {
+        datosx <- runif(9, min = 0, max = 35)
+  ruido <- rnorm(9, mean = 0, sd = 5)
+      tipo_recta<- sample(1:3,1)
+
+      if(tipo_recta==1){
+        pendiente<-runif(1, min=2, max=5)
+        datosy<-10+pendiente*datosx+rnorm(9,mean=0,sd=5)
+      }
+      else if (tipo_recta==2){
+        pendiente<-runif(1,min=-5,max=-2)
+        datosy<-150+pendiente*datosx+rnorm(9,mean=0,sd=5)
+      }
+      else {
+        datosy<-75+0*datosx+rnorm(9,mean=0,sd=15)
+      }
+      datosy<-ifelse(datosy<0,0,datosy)
+      
+
+data.frame(X = round(datosx, 2), Y = round(datosy, 2)) 
+}
+
+
+  datos_base<-reactiveVal(generar_datos_aleatorios())
+  tabla_usuario <- reactiveVal(data.frame(X = numeric(), Y = numeric()))
+
+ output$tablaDatosOriginales <- renderUI({ 
+    
+    datos_totales <- calculo_central()$datos
+    filas_base <- nrow(datos_base())
+    
+    cabecera <- tags$thead(
+      tags$tr(tags$th("Nº Fila"), tags$th("X"), tags$th("Y"))
+    )
+    
+    filas <- lapply(1:nrow(datos_totales), function(i) {
+      
+      estilo_fila <- ""
+      
+      if(i > filas_base) {
+        estilo_fila <- "background-color: #eef7ee; border-left: 4px solid darkgreen;"
+      }
+      
+      tags$tr(style = estilo_fila, 
+              tags$td(tags$b(i)), 
+              tags$td(datos_totales$X[i]), 
+              tags$td(datos_totales$Y[i])
+      )
+    })
+    
+    tags$table(class = "table table-bordered table-sm mt-2 text-center", cabecera, tags$tbody(filas))
+  })
+ 
+
+  
+  observeEvent(input$btn_enviar, {
+  nueva_fila <- data.frame(X = input$x, Y = input$y)
+  tabla_actual <- tabla_usuario()
+    
+    tabla_actualizada <- rbind(tabla_actual, nueva_fila)
+    tabla_usuario(tabla_actualizada)  })
+  
+  
+observeEvent(input$btn_limpiar,{
+      tabla_usuario(data.frame(X=numeric(),Y=numeric()))
+      updateNumericInput(getDefaultReactiveDomain(),"x", value = 15)
+      updateNumericInput(getDefaultReactiveDomain(),"y", value=75)
+      updateNumericInput(getDefaultReactiveDomain(), "num_fila_borrar", value=1)
+      showNotification("Puntos añadidos eliminados. El modelo base se mantiene intacto.", type = "message")
+    })
+  
+  observeEvent(input$btn_borrar_fila, {
+   fila_borrar <- input$num_fila_borrar
+    base_actual <- datos_base()
+    añadidos_actual <- tabla_usuario()
+    
+    num_base <- nrow(base_actual)
+    num_total <- num_base + nrow(añadidos_actual)
+    
+    if (is.na(fila_borrar) || fila_borrar < 1 || fila_borrar > num_total) {
+      showNotification("Por favor, introduce un número de fila válido.", type = "error")
+      return()
+    }
+    
+
+    if (num_total <= 3) {
+      showNotification("¡Cuidado! Necesitas al menos 3 puntos para poder calcular el modelo.", type = "warning")
+      return()
+    }
+    
+    if (fila_borrar <= num_base) {
+      nueva_base <- base_actual[-fila_borrar, ]
+      datos_base(nueva_base)
+      showNotification("Dato original eliminado.", type = "message")
+      
+    } else {
+      
+      indice_añadido <- fila_borrar - num_base
+      nuevos_añadidos <- añadidos_actual[-indice_añadido, ]
+      tabla_usuario(nuevos_añadidos)
+      showNotification("Dato añadido por ti eliminado.", type = "message")
+      
+    }
+  })
+  
+  observe({
+    total_filas <- nrow(tabla_usuario())
+    limite_maximo <- if(total_filas > 0) total_filas else 1
+    valor_actual <- isolate(input$num_fila_borrar)
+    
+    if (!is.null(valor_actual) && valor_actual > limite_maximo) {
+      updateNumericInput(getDefaultReactiveDomain(), "num_fila_borrar", 
+                         value = limite_maximo, 
+                         max = limite_maximo)
+    } else {
+      updateNumericInput(getDefaultReactiveDomain(), "num_fila_borrar", 
+                         max = limite_maximo)
+    }
+  })
+  observeEvent(input$btn_nuevo_escenario, {
+    datos_base(generar_datos_aleatorios())
+    tabla_usuario(data.frame(X = numeric(), Y = numeric()))
+    
+    updateNumericInput(getDefaultReactiveDomain(), "x", value = 15)
+    updateNumericInput(getDefaultReactiveDomain(), "y", value = 75)
+    updateNumericInput(getDefaultReactiveDomain(), "num_fila_borrar", value = 1)
+  })
+  
+  #carga de datos externos (CSV)
+observeEvent(input$archivo_datos,{
+    archivo<-input$archivo_datos
+    if(is.null(archivo)) return()
+    
+    #leer el archivo
+
+    tryCatch({
+      
+      if (grepl("\\.csv$", archivo$name, ignore.case = TRUE)) {
+        tmp <- read.csv2(archivo$datapath)
+        if (ncol(tmp) < 2) { tmp <- read.csv(archivo$datapath) }
+        datos_subidos<-tmp
+      } else {
+        # Fuerza bruta pura para TXT
+datos_subidos <- read.table(archivo$datapath, header = TRUE, sep = "", stringsAsFactors = FALSE)     }
+      
+    
+    
+    if (is.null(datos_subidos)|| ncol(datos_subidos) < 2) {
+      showNotification("Error crítico al leer el archivo.", type = "error")
+      return()
+    }
+
+    
+    col_x <- as.character(datos_subidos[, 1])
+    col_y <- as.character(datos_subidos[, 2])
+  
+    col_x <- gsub(",", ".", col_x)
+    col_y <- gsub(",", ".", col_y)
+    col_x <- gsub("[^0-9.-]", "", col_x)
+    col_y <- gsub("[^0-9.-]", "", col_y)
+  
+    
+      datos_limpios<-data.frame(
+        X=as.numeric(col_x),
+        Y=as.numeric(col_y)
+      )
+      datos_limpios<-na.omit(datos_limpios)
+      
+      if (nrow(datos_limpios) == 0) {
+        showNotification("El archivo se quedó vacío al limpiar los datos.", type = "error")
+        return()
+      }
+      
+      datos_base(datos_limpios)
+      tabla_usuario(data.frame(X=numeric(),Y =numeric()))
+      showNotification("Datos cargados con éxito. El modelo base se ha actualizado",
+                       type="message")
+  },error=function(e){
+print(paste("EL ESCUDO HA DETENIDO UN ERROR:", e$message))
+      showNotification(paste("Error en los datos:", e$message), type = "error", duration = 6)
+      })
+    })
+  
+  
+  
+  #Para crear una tabla nueva vacía si queremos quitar un archivo de la app
+  interruptor_archivo <- reactiveVal(0)
+  
+  observeEvent(input$btn_quitar_archivo, {
+    interruptor_archivo(interruptor_archivo() + 1)
+    datos_base(generar_datos_aleatorios())
+
+    tabla_usuario(data.frame(X = numeric(), Y = numeric()))
+
+    showNotification("Archivo eliminado. Volviendo a escenario aleatorio.", type = "warning", duration = 3)
+  })
+  
+  
+  output$caja_subir_archivo <- renderUI({
+    #cada vez que el interruptor cambie, R redibujará la caja
+    interruptor_archivo() 
+    
+    fileInput("archivo_datos", "Subir datos propios (.csv o .txt)", 
+              accept = c(".csv", ".txt"), 
+              buttonLabel = "Buscar...", 
+              placeholder = "Ningún archivo")
+  })
+  
+    calculo_central <- reactive({
+    
+    datos_completos<-datos_base()
+    if (nrow(tabla_usuario()) > 0) {
+      datos_completos <- rbind(datos_base(), tabla_usuario())
+    }
+    modelo_nuevo <- lm(Y ~ X, data = datos_completos)
+    modelo_original<- lm(Y ~ X, data = datos_base())
+
+    list(datos = datos_completos, modelo = modelo_nuevo,
+         modelo_orig=modelo_original)
+  })
+    
+    
+  ### PESTAÑA 1
+    
+    
+  output$graficaRectas <- renderPlot({ 
+    # Llamamos a los datos y modelo calculados arriba
+    datos_completos <- calculo_central()$datos
+    modelo_nuevo <- calculo_central()$modelo
+    
+    limites_x <- extendrange(datos_completos$X, f = 0.1)
+    limites_y <- extendrange(datos_completos$Y, f = 0.1)
+    
+    plot(datos_completos$X, datos_completos$Y, 
+         main = "Ajuste de Recta con el Punto del Usuario",
+         xlab = "Eje X", ylab = "Eje Y",
+         pch = 19, col = "blue", cex = 2,
+         xlim = limites_x, ylim = limites_y)
+        abline(calculo_central()$modelo_orig, col = "black", lwd = 2, lty = 2)
+
+        #para cuando el usuario no haya introducido el valor
+   if (nrow(tabla_usuario()) > 0) {
+      # Pintamos TODOS los puntos que haya en la tabla del usuario
+      points(tabla_usuario()$X, tabla_usuario()$Y, col = "red", pch = 19, cex = 2)
+      abline(modelo_nuevo, col = "darkgreen", lwd = 3)
+      legend("topleft", legend = c("Recta original", "Recta nueva"), col = c("black", "darkgreen"), lty = c(2, 1))
+    } else {
+      # Si la tabla está vacía (0 filas), solo mostramos la original
+      legend("topleft", legend = c("Recta original"), col = c("black"), lty = 2)
+    }
+  }) 
+   
+ # PARA EL MODELO DE REGRESIÓN
+  
+  output$tarjetaOriginal <- renderUI({
+    pendiente_original <- round(coef(calculo_central()$modelo_orig)[2], 3)
+    ordenada_original <- round(coef(calculo_central()$modelo_orig)[1], 3)
+    
+    # Creamos una tarjeta 
+
+        card(
+      # le da esa sombra elegante debajo
+      class = "shadow-sm mb-3 border-dark", 
+        card_header(
+        tags$b("Modelo Original"),
+        class = "bg-light" # Fondo gris clarito para el título
+      ),
+      
+      card_body(
+        p("Ecuación: ", tags$code("Y = ", ordenada_original, " + ", pendiente_original, " * X")),
+        
+        p(class = "text-muted mb-0", #letra en gris
+          "Pendiente: ", tags$b(pendiente_original), 
+          " | Ordenada en el origen: ", tags$b(ordenada_original)
+        )
+      )
+    )
+    
+  })
+    
+   # PARA EL MODELO DE REGRESIÓN CON EL DATO QUE SE AÑADE
+
+  output$tarjetaNueva <- renderUI({
+
+if (nrow(tabla_usuario()) == 0) return(NULL)
+    modelo_nuevo <- calculo_central()$modelo
+    pendiente_nueva <- round(coef(modelo_nuevo)[2], 3)
+    ordenada_nueva <- round(coef(modelo_nuevo)[1], 3)
+    
+    card(
+      class = "shadow-sm mb-3 border-success", #verde
+      
+      card_header(
+        tags$b("Modelo Nuevo"),
+        class = "bg-success text-white" 
+      ),
+      
+      card_body(
+        p("Ecuación: ", tags$code("Y = ", ordenada_nueva, " + ", pendiente_nueva, " * X")),
+        
+        p(class = "text-muted mb-0", 
+          "Pendiente: ", tags$b(pendiente_nueva), 
+          " | Ordenada en el origen: ", tags$b(ordenada_nueva)
+        )
+      )
+    )
+  })
+  
+  # PESTAÑA 2 DIAGNOSIS
+
+    output$plotLinealidad <- renderPlot({
+    modelo_nuevo <- calculo_central()$modelo
+    plot(modelo_nuevo, which = 1, main = "Linealidad", caption = "", sub.caption = "")
+  })
+  
+  output$plotHomocedasticidad <- renderPlot({
+    modelo_nuevo <- calculo_central()$modelo
+    plot(modelo_nuevo, which = 3, main = "Evaluación de la Homocedasticidad", caption = "", sub.caption = "", lwd = 3) 
+  })
+  
+  output$plotNormalidad <- renderPlot({
+    modelo_nuevo <- calculo_central()$modelo
+    residuos <- residuals(modelo_nuevo)
+    par(mfrow=c(1,2))
+    
+    # A LA IZQUIERDA LA EMPÍRICA Y A LA DERECHA EL Q-Q
+    plot(density(residuos), 
+         main = "Distribución Empírica", 
+         xlab = "Valor del Residuo", 
+         ylab = "Densidad",
+         col = "blue", lwd = 3)
+    abline(v = 0, col = "red", lty = 2, lwd = 2)
+    
+    plot(modelo_nuevo, which = 2, main = "Normalidad (Q-Q Plot)", caption = "", sub.caption = "", lwd = 2) 
+  })
+
+  output$plotAutocorrelacion <- renderPlot({
+    modelo_nuevo <- calculo_central()$modelo
+    residuos <- residuals(modelo_nuevo)
+    
+    plot(residuos, type = "b", pch = 19, col = "darkorange",
+         main = "Residuos vs Orden de Observación",
+         xlab = "Orden (Índice del dato)", ylab = "Valor del Residuo", 
+         lwd = 2, cex = 1.5)
+    abline(h = 0, col = "black", lty = 2, lwd = 2)
+  })
+  
+  # Tests Estadísticos (Pestaña 2)
+  
+  #SHAPIRO-WILK
+  output$testResiduos <- renderPrint({
+    modelo_nuevo <- calculo_central()$modelo
+    test_shapiro <- shapiro.test(residuals(modelo_nuevo))
+    
+    cat("TEST DE NORMALIDAD (Shapiro-Wilk)\n")
+    cat("----------------------------------\n")
+    print((test_shapiro))
+    
+    cat("\nINTERPRETACIÓN:\n")
+    if(test_shapiro$p.value > 0.05) {
+      cat("P-valor > 0.05: NO hay evidencia para rechazar la normalidad.\n")
+      cat("Los residuos se comportan como una Normal. El modelo cumple el supuesto.")
+    } else {
+      cat("P-valor <= 0.05: Se rechaza la normalidad.\n")
+      cat("¡Cuidado! Los residuos no son normales (posiblemente por el punto añadido).")
+    }
+  })
+  
+  #DURBIN-WATSON
+  
+  output$testDW <- renderPrint({
+    modelo_nuevo <- calculo_central()$modelo
+    residuos <- residuals(modelo_nuevo)    
+    
+    n <- length(residuos)
+    # Estadístico Final
+    dw_stat <- (sum((residuos[2:n] - residuos[1:(n-1)])^2)) / (sum(residuos^2))
+    
+    cat("TEST DE DURBIN-WATSON (Independencia)\n")
+    cat("-------------------------------------\n")
+    cat("Estadístico DW: ", round(dw_stat, 4), "\n\n")
+    
+    cat("\nINTERPRETACIÓN:\n")
+    cat("El estadístico DW varía entre 0 y 4. El valor ideal es 2.\n")
+    if (dw_stat > 1.5 & dw_stat < 2.5) {
+      cat("✅ RESULTADO IDEAL: El valor está muy cerca de 2.\n")
+      cat("Los errores son independientes. No hay autocorrelación grave.")
+    } else if (dw_stat <= 1.5) {
+      cat("⚠️ ATENCIÓN: El valor se acerca peligrosamente a 0.\n")
+      cat("Existe una posible autocorrelación POSITIVA (los errores se siguen entre sí).")
+    } else {
+      cat("⚠️ ATENCIÓN: El valor se acerca peligrosamente a 4.\n")
+      cat("Existe una posible autocorrelación NEGATIVA (los errores alternan drásticamente).")
+    }
+  })
+
+  
+  
+  #PESTAÑA 3 VALORES ANÓMALOS
+
+  output$plotResiduosEstandarizados <- renderPlot({
+    modelo_nuevo <- calculo_central()$modelo
+    res_est <- rstandard(modelo_nuevo)
+    
+    plot(res_est, pch = 19, col = "purple", cex = 1.5,ylim=c(-2,2),
+         main = "Residuos Estandarizados",
+         ylab = "Valor del Residuo Estandarizado", xlab = "Índice de Observación")
+    
+    # Fronteras de anomalías (2 y -2)
+    abline(h = 0, col = "black", lty = 1)
+    abline(h = c(-2, 2), col = "red", lty = 2, lwd = 2)
+  })
+  
+  output$testBonferroni <- renderPrint({
+    modelo_nuevo <- calculo_central()$modelo
+    res_stud <- rstudent(modelo_nuevo)
+    indice_extremo <- which.max(abs(res_stud))#error más grande
+    residuo_extremo <- res_stud[indice_extremo]
+    
+    #p-valor
+    n <- length(res_stud) 
+    grados_libertad <- df.residual(modelo_nuevo) - 1
+    p_valor_bruto <- 2 * pt(abs(residuo_extremo), df = grados_libertad, lower.tail = FALSE)
+    p_valor_bonf <- min(p_valor_bruto * n, 1) # Usamos min() para que nunca pase de 1
+    
+    cat("TEST DE VALORES ANÓMALOS (CON CORRECCIÓN DE BONFERRONI)\n")
+    cat("-------------------------------------------------------\n")
+    cat("Sospechoso principal: Observación nº", indice_extremo, "\n")
+    cat("Valor del residuo:    ", round(residuo_extremo, 4), "\n")
+    cat("P-valor ajustado:     ", round(p_valor_bonf, 4), "\n\n")
+    
+    cat("INTERPRETACIÓN DE LA APP:\n")
+    
+    if (p_valor_bonf > 0.05) {
+      cat("✅ RESULTADO: No se han detectado valores anómalos (Outliers) significativos.\n")
+      cat("El residuo de la observación nº", indice_extremo, "es el más grande del conjunto,\n")
+      cat("pero tras aplicar el ajuste de Bonferroni, su tamaño entra dentro de la variabilidad normal.")
+    } else {
+      cat("🔍 OBSERVACIÓN: Se ha detectado un valor anómalo (Outlier) significativo.\n")
+      cat("El p-valor ajustado (", round(p_valor_bonf, 4), ") es menor a 0.05.\n", sep="")
+      cat("La observación nº", indice_extremo, "se aleja de la tendencia general más de lo habitual.\n")
+      cat("Recomendación: Sería interesante revisar este punto o eliminarlo para ver cómo afecta al modelo.")
+    }
+  })
+  
+
+  # --- DIAGNÓSTICO 5B: INFLUENCIA Y DISTANCIA DE COOK ---
+  
+  output$plotInfluencia <- renderPlot({
+    datos_completos <- calculo_central()$datos
+    modelo_nuevo <- calculo_central()$modelo
+    
+      limites_x <- extendrange(datos_completos$X, f = 0.1)
+    limites_y <- extendrange(datos_completos$Y, f = 0.1)
+    
+    par(mfrow = c(1, 2))
+    
+    # IZQUIERDA: Efecto visual en la recta original vs nueva
+    plot(datos_completos$X, datos_completos$Y, 
+         main = "Efecto Visual en la Recta",
+         xlab = "X", ylab = "Y", pch = 19, col = "blue",
+         xlim = limites_x, ylim = limites_y)
+    abline(calculo_central()$modelo_orig, col = "black", lwd = 2, lty = 2) 
+    abline(modelo_nuevo, col = "darkgreen", lwd = 3)     
+    points(input$x, input$y, col = "red", pch = 19, cex = 2) 
+    
+    # DERECHA: Gráfico Distancia de Cook 
+    distancias_cook <- cooks.distance(modelo_nuevo)
+    
+    plot(distancias_cook,type="h", col="black",lwd=3,
+         main = "Distancia de Cook",xlab="Orden del dato", 
+         ylab="Valos distancia de Cook",ylim=c(0,1))
+    abline(h = 1, col = "red", lty = 2, lwd = 2)
+  })
+ 
+  
+  # PESTAÑA 4 PREDICCIÓN
+  
+  output$tarjetaPrediccion <- renderUI({
+    
+    valor_x <- input$x
+    valor_x<-input$x_prediccion
+    
+    pred_orig <- round(predict(calculo_central()$modelo_orig, newdata = data.frame(X = valor_x)), 2)
+    
+    tarjeta_original<-card(
+        class = "shadow-sm flex-fill mb-0", # flex-fill hace que ocupe el mismo ancho que la otra
+          style = "border-left: 6px solid black; min-width: 250px;",
+          card_body(
+            h5(class = "mt-0 text-dark", tags$b("Predicción Modelo Original")),
+            p("Para X = ", valor_x, ", el modelo original estimaba:"),
+            h3(class = "text-dark mt-2 mb-0", "Y = ", round(pred_orig),2)
+          )
+    )
+    
+    if (nrow(tabla_usuario()) == 0) {
+      # Si NO hay datos nuevos, mostramos la tarjeta original y un aviso
+      aviso <- tags$div(
+        class = "alert alert-secondary mt-3 shadow-sm", style = "border-left: 6px solid #6c757d;",
+        p(class = "mb-0", style = "font-size: 15px;",
+          tags$b("⏳ Esperando datos..."), 
+          " Añade puntos en la barra lateral para generar una recta nueva y poder comparar sus predicciones."
+        )
+      )
+      
+      # Agrupamos y enviamos a la pantalla
+      return(tagList(tags$div(class = "d-flex flex-wrap gap-3", tarjeta_original), aviso))
+      
+    }
+    
+    else{
+      modelo_nuevo <- calculo_central()$modelo
+    pred_nuevo <- round(predict(modelo_nuevo, newdata = data.frame(X = valor_x)), 2)
+
+    tarjeta_nueva<-card(
+          class = "shadow-sm flex-fill mb-0", 
+          style = "border-left: 6px solid darkgreen; min-width: 250px;",
+          card_body(
+            # text-success pone el texto en color verde
+            h5(class = "mt-0 text-success", tags$b("Predicción Modelo Nuevo")),
+            p("Con tu punto añadido, ahora estima:"),
+            h3(class = "text-success mt-2 mb-0", "Y = ", pred_nuevo)
+          )
+        )
+    
+    diferencia<-abs(pred_nuevo-pred_orig)
+    
+    
+    explicacion<-tags$div(
+        class = "alert alert-info mt-4 shadow-sm",
+        style = "border-left: 6px solid #ffc107;",
+        
+        p(class = "mb-0", style = "font-size: 15px;",
+          tags$b("💡 Conclusión del Impacto: "), 
+          "Al introducir tus nuevos puntos en el modelo, la predicción X = ", tags$b(valor_x), 
+          "ha cambiado en ", tags$b(round(diferencia,4)), 
+          " unidades "
+        )
+      )
+    
+    return( tagList(
+      tags$div(
+        class = "d-flex flex-wrap gap-3",tarjeta_original, tarjeta_nueva),explicacion
+              )
+    )
+    }
+    
+  })
+  
+  
+}
+
+# --- EJECUTAR LA APP ---
+shinyApp(ui = ui, server = server)
+```
